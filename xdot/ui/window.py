@@ -42,7 +42,8 @@ from ..dot.lexer import ParseError
 from ._xdotparser import XDotParser
 from . import animation
 from . import actions
-from .elements import Graph
+from .elements import Graph, Edge
+from ..vcdlib import Vcd
 
 
 class DotWidget(Gtk.DrawingArea):
@@ -63,6 +64,7 @@ class DotWidget(Gtk.DrawingArea):
 
         self.graph = Graph()
         self.openfilename = None
+        self.vcd = None
 
         self.set_can_focus(True)
 
@@ -95,6 +97,75 @@ class DotWidget(Gtk.DrawingArea):
         self.highlight_search = False
         self.history_back = []
         self.history_forward = []
+
+    def set_timestep(self, ts):
+        function_name = [_ for _ in self.vcd.net_hier['TOP'].keys() if "lambda_mod" in _][0].replace("_lambda_mod", "")
+        def snk_signal_name(e):
+            name = e.dst.id.decode()
+            if e.dst_port:
+                name = name + "_" + e.dst_port.decode()
+            return name
+
+        def valid(e):
+            src, src_port = e.src.id.decode(), (e.src_port.decode() if e.src_port else "")
+            dst, dst_port = e.dst.id.decode(), (e.dst_port.decode() if e.dst_port else "")
+            if src.startswith("op_HLS_LOCAL_MEM__"):
+                return True
+            if dst.startswith("op_HLS_LOCAL_MEM_RE"):
+                dst, dst_port = src, src_port
+            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_valid")
+            if hier in self.vcd:
+                return self.vcd[hier][ts] == "1"
+            else:
+                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_valid")
+                return self.vcd[hier][ts] == "1"
+
+        def ready(e):
+            src, src_port = e.src.id.decode(), (e.src_port.decode() if e.src_port else "")
+            dst, dst_port = e.dst.id.decode(), (e.dst_port.decode() if e.dst_port else "")
+            if src.startswith("op_HLS_LOCAL_MEM__"):
+                return True
+            if dst.startswith("op_HLS_LOCAL_MEM_RE"):
+                dst, dst_port = src, src_port
+            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_ready")
+            if hier in self.vcd:
+                return self.vcd[hier][ts] == "1"
+            else:
+                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_ready")
+                return self.vcd[hier][ts] == "1"
+
+        def data(e):
+            src, src_port = e.src.id.decode(), (e.src_port.decode() if e.src_port else "")
+            dst, dst_port = e.dst.id.decode(), (e.dst_port.decode() if e.dst_port else "")
+            if src.startswith("op_HLS_LOCAL_MEM__"):
+                return bytes("symbolic connection", "UTF-8")
+            if dst.startswith("op_HLS_LOCAL_MEM_RE"):
+                dst, dst_port = src, src_port
+            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data")
+            if hier in self.vcd:
+                return bytes(hex(int(self.vcd[hier][ts], 2)), "UTF-8")
+            else:
+                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_data")
+                return bytes(hex(int(self.vcd[hier][ts], 2)), "UTF-8")
+
+        for e in self.graph.edges:
+            e.tooltip = data(e)
+            if valid(e):
+                dash = ()
+            else:
+                dash = (6,)
+            if ready(e):
+                linewidth = 4.0
+            else:
+                linewidth = 1.0
+            for s in e.shapes:
+                s.pen.dash = dash
+                s.pen.linewidth = linewidth
+                if hasattr(s, 'highlight_pen'):
+                    del s.highlight_pen
+
+        self.queue_draw()
+
 
     def error_dialog(self, message):
         self.emit('error', message)
@@ -558,6 +629,11 @@ class DotWindow(Gtk.Window):
             <toolitem action="FindNext"/>
             <separator name="FindStatusSeparator"/>
             <toolitem name="FindStatus" action="FindStatus"/>
+            <separator/>
+            <toolitem action="OpenVCD"/>
+            <toolitem name="TimeStep" action="TimeStep"/>
+            <toolitem action="TimeBack"/>
+            <toolitem action="TimeForward"/>
         </toolbar>
     </ui>
     '''
@@ -604,6 +680,7 @@ class DotWindow(Gtk.Window):
             ('ZoomFit', Gtk.STOCK_ZOOM_FIT, None, None, "Fit zoom", self.dotwidget.on_zoom_fit),
             ('Zoom100', Gtk.STOCK_ZOOM_100, None, None, "Reset zoom level", self.dotwidget.on_zoom_100),
             ('FindNext', Gtk.STOCK_GO_FORWARD, 'Next Result', None, 'Move to the next search result', self.on_find_next),
+            ('OpenVCD', None, "Open VCD", None, "Open vcd-file", self.on_open_vcd),
         ))
 
         self.back_action = Gtk.Action('Back', None, None, Gtk.STOCK_GO_BACK)
@@ -623,6 +700,20 @@ class DotWindow(Gtk.Window):
         findstatus_action = FindMenuToolAction("FindStatus", None,
                                                "Number of results found", None)
         actiongroup.add_action(findstatus_action)
+
+        timestep_action = FindMenuToolAction("TimeStep", None,
+                                         "Go to VCD time step", None)
+        actiongroup.add_action(timestep_action)
+
+        self.time_back_action = Gtk.Action('TimeBack', None, None, Gtk.STOCK_GO_BACK)
+        self.time_back_action.set_sensitive(False)
+        self.time_back_action.connect("activate", self.on_time_step)
+        actiongroup.add_action(self.time_back_action)
+
+        self.time_forward_action = Gtk.Action('TimeForward', None, None, Gtk.STOCK_GO_FORWARD)
+        self.time_forward_action.set_sensitive(False)
+        self.time_forward_action.connect("activate", self.on_time_step)
+        actiongroup.add_action(self.time_forward_action)
 
         # Add the actiongroup to the uimanager
         uimanager.insert_action_group(actiongroup, 0)
@@ -647,8 +738,8 @@ class DotWindow(Gtk.Window):
         find_toolitem.add(self.textentry)
 
         self.textentry.set_activates_default(True)
-        self.textentry.connect("activate", self.textentry_activate, self.textentry);
-        self.textentry.connect("changed", self.textentry_changed, self.textentry);
+        self.textentry.connect("activate", self.textentry_activate, self.textentry)
+        self.textentry.connect("changed", self.textentry_changed, self.textentry)
 
         uimanager.get_widget('/ToolBar/FindNextSeparator').set_draw(False)
         uimanager.get_widget('/ToolBar/FindStatusSeparator').set_draw(False)
@@ -658,6 +749,15 @@ class DotWindow(Gtk.Window):
         self.find_count = Gtk.Label()
         findstatus_toolitem = uimanager.get_widget('/ToolBar/FindStatus')
         findstatus_toolitem.add(self.find_count)
+
+        timestep_toolitem = uimanager.get_widget('/ToolBar/TimeStep')
+        self.timestep_textentry = Gtk.Entry()
+        self.timestep_textentry.set_sensitive(False)
+        timestep_toolitem.add(self.timestep_textentry)
+
+        self.timestep_textentry.set_activates_default(True)
+        # self.timestep_textentry.connect("activate", self.textentry_activate, self.timestep_textentry)
+        self.timestep_textentry.connect("changed", self.timestep_changed, self.timestep_textentry)
 
         self.show_all()
 
@@ -689,6 +789,23 @@ class DotWindow(Gtk.Window):
         if found_items:
             self.find_count.set_label('%d nodes found' % len(found_items))
 
+    def timestep_changed(self, widget, entry):
+        time_step = int(self.timestep_textentry.get_text())
+        self.dotwidget.set_timestep(time_step)
+
+    def on_time_step(self, action=None):
+        time_step = int(self.timestep_textentry.get_text())
+        if action.get_name() == "TimeBack":
+            time_step -= 2
+        else:
+            time_step += 2
+        if time_step < self.dotwidget.vcd.start_time:
+            time_step = self.dotwidget.vcd.start_time
+        elif time_step > self.dotwidget.vcd.last_change:
+            time_step = self.dotwidget.vcd.last_change
+        self.timestep_textentry.set_text(str(time_step))
+        self.timestep_changed(None, self.timestep_textentry)
+
     def textentry_activate(self, widget, entry):
         self.find_index = 0
         self.find_next_toolitem.set_sensitive(False)
@@ -713,6 +830,10 @@ class DotWindow(Gtk.Window):
             self.update_title(filename)
             self.dotwidget.zoom_to_fit()
 
+    def set_vcd(self, vcdpath):
+        self.dotwidget.vcd = Vcd(vcdpath)
+        self.dotwidget.set_timestep(self.dotwidget.vcd.start_time)
+
     def set_xdotcode(self, xdotcode, filename=None):
         if self.dotwidget.set_xdotcode(xdotcode):
             self.update_title(filename)
@@ -732,6 +853,16 @@ class DotWindow(Gtk.Window):
         except IOError as ex:
             self.error_dialog(str(ex))
 
+    def open_vcd_file(self, filename):
+        try:
+            self.set_vcd(filename)
+            self.time_back_action.set_sensitive(True)
+            self.time_forward_action.set_sensitive(True)
+            self.timestep_textentry.set_sensitive(True)
+            self.timestep_textentry.set_text(str(self.dotwidget.vcd.start_time))
+        except IOError as ex:
+            self.error_dialog(str(ex))
+
     def on_open(self, action):
         chooser = Gtk.FileChooserDialog(parent=self,
                                         title="Open Graphviz File",
@@ -741,7 +872,7 @@ class DotWindow(Gtk.Window):
                                                  Gtk.STOCK_OPEN,
                                                  Gtk.ResponseType.OK))
         chooser.set_default_response(Gtk.ResponseType.OK)
-        chooser.set_current_folder(self.last_open_dir)
+        chooser.set_current_folder(self.last_open_dir if self.last_open_dir else ".")
         filter = Gtk.FileFilter()
         filter.set_name("Graphviz files")
         filter.add_pattern("*.gv")
@@ -756,6 +887,32 @@ class DotWindow(Gtk.Window):
             self.last_open_dir = chooser.get_current_folder()
             chooser.destroy()
             self.open_file(filename)
+        else:
+            chooser.destroy()
+
+    def on_open_vcd(self, action):
+        chooser = Gtk.FileChooserDialog(parent=self,
+                                        title="Open Waveform File",
+                                        action=Gtk.FileChooserAction.OPEN,
+                                        buttons=(Gtk.STOCK_CANCEL,
+                                                 Gtk.ResponseType.CANCEL,
+                                                 Gtk.STOCK_OPEN,
+                                                 Gtk.ResponseType.OK))
+        chooser.set_default_response(Gtk.ResponseType.OK)
+        chooser.set_current_folder(self.last_open_dir if self.last_open_dir else ".")
+        filter = Gtk.FileFilter()
+        filter.set_name("Waveform files")
+        filter.add_pattern("*.vcd")
+        chooser.add_filter(filter)
+        filter = Gtk.FileFilter()
+        filter.set_name("All files")
+        filter.add_pattern("*")
+        chooser.add_filter(filter)
+        if chooser.run() == Gtk.ResponseType.OK:
+            filename = chooser.get_filename()
+            self.last_open_dir = chooser.get_current_folder()
+            chooser.destroy()
+            self.open_vcd_file(filename)
         else:
             chooser.destroy()
    

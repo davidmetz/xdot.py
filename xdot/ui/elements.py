@@ -605,12 +605,14 @@ def square_distance(x1, y1, x2, y2):
 
 class Edge(Element):
 
-    def __init__(self, src, dst, points, shapes, tooltip):
+    def __init__(self, src, dst, points, shapes, tooltip, src_port=None, dst_port=None):
         Element.__init__(self, shapes)
         self.src = src
         self.dst = dst
         self.points = points
         self.tooltip = tooltip
+        self.src_port = src_port
+        self.dst_port = dst_port
 
     RADIUS = 10
 

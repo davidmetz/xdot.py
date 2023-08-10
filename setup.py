@@ -55,6 +55,7 @@ setup(
     ],
 
     install_requires=[
+        'Verilog_VCD',
         'PyGObject',
         'numpy'
     ],

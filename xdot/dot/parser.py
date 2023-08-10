@@ -142,13 +142,13 @@ class DotParser(Parser):
         elif self.lookahead.type in (SUBGRAPH, LCURLY):
             self.parse_subgraph()
         else:
-            id = self.parse_node_id()
+            id, port = self.parse_node_id(True)
             if self.lookahead.type == EDGE_OP:
                 self.consume()
-                node_ids = [id, self.parse_node_id()]
+                node_ids = [(id, port), self.parse_node_id(True)]
                 while self.lookahead.type == EDGE_OP:
                     self.consume()
-                    node_ids.append(self.parse_node_id())
+                    node_ids.append(self.parse_node_id(True))
                 attrs = self.parse_attrs()
                 for i in range(0, len(node_ids) - 1):
                     self.handle_edge(node_ids[i], node_ids[i + 1], attrs)
@@ -183,7 +183,7 @@ class DotParser(Parser):
             value = b'true'
         return name, value
 
-    def parse_node_id(self):
+    def parse_node_id(self, use_port=False):
         node_id = self.parse_id()
         if self.lookahead.type == COLON:
             self.consume()
@@ -198,6 +198,8 @@ class DotParser(Parser):
             compass_pt = None
             # XXX: we don't really care about port and compass point
             # values when parsing xdot
+        if use_port:
+            return node_id, port
         return node_id
 
     def parse_id(self):
