@@ -164,6 +164,28 @@ class DotWidget(Gtk.DrawingArea):
                 if hasattr(s, 'highlight_pen'):
                     del s.highlight_pen
 
+        def get_buffer_data(node_name):
+            result = []
+            for i in range(100):
+                valid_hier = ('TOP', function_name + '_lambda_mod', 'sr', node_name, f"buf{i}_valid_reg")
+                if valid_hier not in self.vcd:
+                    break
+                vld = self.vcd[valid_hier][ts] == "1"
+                if not vld:
+                    break
+                data_hier = ('TOP', function_name + '_lambda_mod', 'sr', node_name, f"buf{i}_data_reg")
+                result.append(hex(int(self.vcd[data_hier][ts], 2)))
+            return result
+
+        for n in self.graph.nodes:
+            nn = n.id.decode()
+            if "HLS_BUF" in nn:
+                bd = get_buffer_data(nn)
+                if bd:
+                    n.tooltip = bytes("\n".join(bd), "UTF-8")
+                else:
+                    n.tooltip = b"empty"
+
         self.queue_draw()
 
 
