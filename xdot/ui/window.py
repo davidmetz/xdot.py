@@ -517,6 +517,26 @@ class DotWidget(Gtk.DrawingArea):
         (click on empty space)."""
         return False
 
+    def edge_click(self, x, y):
+        gx, gy = self.window2graph(x, y)
+        for edge in self.graph.edges:
+            jump = edge.get_jump(gx, gy)
+            if jump is not None:
+                break
+        else:
+            return False
+        for s in edge.shapes:
+            if hasattr(s, "old_pen"):
+                s.pen = s.old_pen
+                del s.old_pen
+            else:
+                s.old_pen = s.pen.copy()
+                s.pen.color = (1, 0, 1, 1)
+                s.pen.fillcolor = (1, .8, .8, 1)
+        self.queue_draw()
+        return True
+
+
     def on_area_button_release(self, area, event):
         self.drag_action.on_button_release(event)
         self.drag_action = actions.NullAction(self)
@@ -530,6 +550,8 @@ class DotWidget(Gtk.DrawingArea):
                 url = self.get_url(x, y)
                 if url is not None:
                     self.emit('clicked', url.url, event)
+                elif self.edge_click(x, y):
+                    pass
                 else:
                     jump = self.get_jump(x, y)
                     if jump is not None:
