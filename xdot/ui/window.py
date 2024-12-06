@@ -59,9 +59,10 @@ class DotWidget(Gtk.DrawingArea):
     filter = 'dot'
     graphviz_version = None
 
-    def __init__(self):
+    def __init__(self, window):
         Gtk.DrawingArea.__init__(self)
 
+        self.window = window
         self.graph = Graph()
         self.openfilename = None
         self.vcd = None
@@ -114,39 +115,82 @@ class DotWidget(Gtk.DrawingArea):
             if dst.startswith("op_HLS_LOCAL_MEM_RE"):
                 dst, dst_port = src, src_port
             hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_valid")
+            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_valid")
             if hier in self.vcd:
                 return self.vcd[hier][ts] == "1"
+            elif hier2 in self.vcd:
+                return self.vcd[hier2][ts] == "1"
             else:
-                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_valid")
-                return self.vcd[hier][ts] == "1"
+                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_valid")
+                if hier3 in self.vcd:
+                    return self.vcd[hier3][ts] == "1"
+                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_valid")
+                if hier4 in self.vcd:
+                    return self.vcd[hier4][ts] == "1"
+                return False
 
         def ready(e):
             src, src_port = e.src.id.decode(), (e.src_port.decode() if e.src_port else "")
             dst, dst_port = e.dst.id.decode(), (e.dst_port.decode() if e.dst_port else "")
             if src.startswith("op_HLS_LOCAL_MEM__"):
                 return True
-            if dst.startswith("op_HLS_LOCAL_MEM_RE"):
-                dst, dst_port = src, src_port
+            # if dst.startswith("op_HLS_LOCAL_MEM_RE"):
+            #     dst, dst_port = src, src_port
             hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_ready")
+            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_ready")
             if hier in self.vcd:
                 return self.vcd[hier][ts] == "1"
+            elif hier2 in self.vcd:
+                return self.vcd[hier2][ts] == "1"
             else:
-                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_ready")
-                return self.vcd[hier][ts] == "1"
+                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_ready")
+                if hier3 in self.vcd:
+                    return self.vcd[hier3][ts] == "1"
+                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_ready")
+                if hier4 in self.vcd:
+                    return self.vcd[hier4][ts] == "1"
+                return False
 
         def data(e):
             src, src_port = e.src.id.decode(), (e.src_port.decode() if e.src_port else "")
             dst, dst_port = e.dst.id.decode(), (e.dst_port.decode() if e.dst_port else "")
             if src.startswith("op_HLS_LOCAL_MEM__"):
                 return bytes("symbolic connection", "UTF-8")
-            if dst.startswith("op_HLS_LOCAL_MEM_RE"):
-                dst, dst_port = src, src_port
+            # if dst.startswith("op_HLS_LOCAL_MEM_RE"):
+            #     dst, dst_port = src, src_port
+            if dst.startswith("op_HLS_MEM_RESP"):
+                id = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data_id")][ts],2)
+                data = hex(int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data_data")][ts],2))
+                return bytes(f"resp(id={id}, data={data})", "UTF-8")
+            if src.startswith("op_HLS_MEM_REQ"):
+                id = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_id")][ts],2)
+                size = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_size")][ts],2)
+                addr = hex(int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_addr")][ts],2))
+                data_hier = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_data")
+                write_hier = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_write")
+                if write_hier in self.vcd:
+                    write = self.vcd[write_hier][ts] == "1"
+                    data = hex(int(self.vcd[data_hier][ts],2))
+                else:
+                    write = False
+                if write:
+                    return bytes(f"store(id={id}, addr={addr}, data={data}, size={size})", "UTF-8")
+                else:
+                    return bytes(f"load(id={id}, addr={addr}, size={size})", "UTF-8")
             hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data")
+            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data")
             if hier in self.vcd:
                 return bytes(hex(int(self.vcd[hier][ts], 2)), "UTF-8")
+            elif hier2 in self.vcd:
+                return bytes(hex(int(self.vcd[hier2][ts], 2)), "UTF-8")
             else:
-                hier = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_data")
-                return bytes(hex(int(self.vcd[hier][ts], 2)), "UTF-8")
+                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_data")
+                if hier3 in self.vcd:
+                    return bytes(hex(int(self.vcd[hier3][ts], 2)), "UTF-8")
+                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_data")
+                if hier4 in self.vcd:
+                    return bytes(hex(int(self.vcd[hier4][ts], 2)), "UTF-8")
+                return b"not found"
 
         for e in self.graph.edges:
             e.tooltip = data(e)
@@ -166,7 +210,7 @@ class DotWidget(Gtk.DrawingArea):
 
         def get_buffer_data(node_name):
             result = []
-            for i in range(100):
+            for i in range(200):
                 valid_hier = ('TOP', function_name + '_lambda_mod', 'sr', node_name, f"buf{i}_valid_reg")
                 if valid_hier not in self.vcd:
                     break
@@ -179,10 +223,10 @@ class DotWidget(Gtk.DrawingArea):
 
         for n in self.graph.nodes:
             nn = n.id.decode()
-            if "HLS_BUF" in nn:
+            if "HLS_BUF" in nn or "HLS_ADDR_QUEUE" in nn:
                 bd = get_buffer_data(nn)
                 if bd:
-                    n.tooltip = bytes("\n".join(bd), "UTF-8")
+                    n.tooltip = bytes(f"({len(bd)}):\n"+"\n".join(bd), "UTF-8")
                 else:
                     n.tooltip = b"empty"
 
@@ -531,8 +575,9 @@ class DotWidget(Gtk.DrawingArea):
                 del s.old_pen
             else:
                 s.old_pen = s.pen.copy()
-                s.pen.color = (1, 0, 1, 1)
-                s.pen.fillcolor = (1, .8, .8, 1)
+                tmp = self.window.color_chooser.get_rgba()
+                s.pen.color = tmp
+                s.pen.fillcolor = tmp
         self.queue_draw()
         return True
 
@@ -678,6 +723,8 @@ class DotWindow(Gtk.Window):
             <toolitem name="TimeStep" action="TimeStep"/>
             <toolitem action="TimeBack"/>
             <toolitem action="TimeForward"/>
+            <separator/>
+            <toolitem name="HighlightColor" action="HighlightColor"/>
         </toolbar>
     </ui>
     '''
@@ -697,7 +744,7 @@ class DotWindow(Gtk.Window):
         vbox = Gtk.VBox()
         window.add(vbox)
 
-        self.dotwidget = widget or DotWidget()
+        self.dotwidget = widget or DotWidget(self)
         self.dotwidget.connect("error", lambda e, m: self.error_dialog(m))
         self.dotwidget.connect("history", self.on_history)
 
@@ -748,6 +795,10 @@ class DotWindow(Gtk.Window):
         timestep_action = FindMenuToolAction("TimeStep", None,
                                          "Go to VCD time step", None)
         actiongroup.add_action(timestep_action)
+
+        color_action = FindMenuToolAction("HighlightColor", None,
+                                         "Select color", None)
+        actiongroup.add_action(color_action)
 
         self.time_back_action = Gtk.Action('TimeBack', None, None, Gtk.STOCK_GO_BACK)
         self.time_back_action.set_sensitive(False)
@@ -803,6 +854,10 @@ class DotWindow(Gtk.Window):
         # self.timestep_textentry.connect("activate", self.textentry_activate, self.timestep_textentry)
         self.timestep_textentry.connect("changed", self.timestep_changed, self.timestep_textentry)
 
+        color_chooser_toolitem = uimanager.get_widget('/ToolBar/HighlightColor')
+        self.color_chooser = Gtk.ColorChooserWidget(show_editor=False)
+        color_chooser_toolitem.add(self.color_chooser)
+
         self.show_all()
 
     def find_text(self, entry_text):
@@ -834,8 +889,11 @@ class DotWindow(Gtk.Window):
             self.find_count.set_label('%d nodes found' % len(found_items))
 
     def timestep_changed(self, widget, entry):
-        time_step = int(self.timestep_textentry.get_text())
-        self.dotwidget.set_timestep(time_step)
+        try:
+            time_step = int(self.timestep_textentry.get_text())
+            self.dotwidget.set_timestep(time_step)
+        except ValueError as e:
+            print(e)
 
     def on_time_step(self, action=None):
         time_step = int(self.timestep_textentry.get_text())
