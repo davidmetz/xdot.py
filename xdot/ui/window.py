@@ -100,7 +100,16 @@ class DotWidget(Gtk.DrawingArea):
         self.history_forward = []
 
     def set_timestep(self, ts):
-        function_name = [_ for _ in self.vcd.net_hier['TOP'].keys() if "lambda_mod" in _][0].replace("_lambda_mod", "")
+
+        # function_name = [_ for _ in self.vcd.net_hier['TOP'].keys() if "lambda_mod" in _][0].replace("_lambda_mod", "")
+        def find_sr_path(hier):
+            for name, h in hier.items():
+                if name == "sr":
+                    return (name, )
+                if path := find_sr_path(h):
+                    return (name,)+path
+
+        vcd_sr_path = find_sr_path(self.vcd.net_hier)#('TOP', function_name + '_lambda_mod', 'sr')
         def snk_signal_name(e):
             name = e.dst.id.decode()
             if e.dst_port:
@@ -114,17 +123,17 @@ class DotWidget(Gtk.DrawingArea):
                 return True
             if dst.startswith("op_HLS_LOCAL_MEM_RE"):
                 dst, dst_port = src, src_port
-            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_valid")
-            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_valid")
+            hier = vcd_sr_path + (dst, dst_port + "_valid")
+            hier2 = vcd_sr_path + (src, src_port + "_valid")
             if hier in self.vcd:
                 return self.vcd[hier][ts] == "1"
             elif hier2 in self.vcd:
                 return self.vcd[hier2][ts] == "1"
             else:
-                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_valid")
+                hier3 = vcd_sr_path + (dst + "_valid",)
                 if hier3 in self.vcd:
                     return self.vcd[hier3][ts] == "1"
-                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_valid")
+                hier4 = vcd_sr_path + (src + "_valid",)
                 if hier4 in self.vcd:
                     return self.vcd[hier4][ts] == "1"
                 return False
@@ -136,17 +145,17 @@ class DotWidget(Gtk.DrawingArea):
                 return True
             # if dst.startswith("op_HLS_LOCAL_MEM_RE"):
             #     dst, dst_port = src, src_port
-            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_ready")
-            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_ready")
+            hier = vcd_sr_path + (dst, dst_port + "_ready")
+            hier2 = vcd_sr_path + (src, src_port + "_ready")
             if hier in self.vcd:
                 return self.vcd[hier][ts] == "1"
             elif hier2 in self.vcd:
                 return self.vcd[hier2][ts] == "1"
             else:
-                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_ready")
+                hier3 = vcd_sr_path + (dst + "_ready",)
                 if hier3 in self.vcd:
                     return self.vcd[hier3][ts] == "1"
-                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_ready")
+                hier4 = vcd_sr_path + (src + "_ready",)
                 if hier4 in self.vcd:
                     return self.vcd[hier4][ts] == "1"
                 return False
@@ -159,15 +168,15 @@ class DotWidget(Gtk.DrawingArea):
             # if dst.startswith("op_HLS_LOCAL_MEM_RE"):
             #     dst, dst_port = src, src_port
             if dst.startswith("op_HLS_MEM_RESP"):
-                id = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data_id")][ts],2)
-                data = hex(int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data_data")][ts],2))
+                id = int(self.vcd[vcd_sr_path + (dst, dst_port + "_data_id")][ts],2)
+                data = hex(int(self.vcd[vcd_sr_path + (dst, dst_port + "_data_data")][ts],2))
                 return bytes(f"resp(id={id}, data={data})", "UTF-8")
             if src.startswith("op_HLS_MEM_REQ"):
-                id = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_id")][ts],2)
-                size = int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_size")][ts],2)
-                addr = hex(int(self.vcd[('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_addr")][ts],2))
-                data_hier = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_data")
-                write_hier = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data_write")
+                id = int(self.vcd[vcd_sr_path + (src, src_port + "_data_id")][ts],2)
+                size = int(self.vcd[vcd_sr_path + (src, src_port + "_data_size")][ts],2)
+                addr = hex(int(self.vcd[vcd_sr_path + (src, src_port + "_data_addr")][ts],2))
+                data_hier = vcd_sr_path + (src, src_port + "_data_data")
+                write_hier = vcd_sr_path + (src, src_port + "_data_write")
                 if write_hier in self.vcd:
                     write = self.vcd[write_hier][ts] == "1"
                     data = hex(int(self.vcd[data_hier][ts],2))
@@ -177,17 +186,17 @@ class DotWidget(Gtk.DrawingArea):
                     return bytes(f"store(id={id}, addr={addr}, data={data}, size={size})", "UTF-8")
                 else:
                     return bytes(f"load(id={id}, addr={addr}, size={size})", "UTF-8")
-            hier = ('TOP', function_name + '_lambda_mod', 'sr', dst, dst_port + "_data")
-            hier2 = ('TOP', function_name + '_lambda_mod', 'sr', src, src_port + "_data")
+            hier = vcd_sr_path + (dst, dst_port + "_data")
+            hier2 = vcd_sr_path + (src, src_port + "_data")
             if hier in self.vcd:
                 return bytes(hex(int(self.vcd[hier][ts], 2)), "UTF-8")
             elif hier2 in self.vcd:
                 return bytes(hex(int(self.vcd[hier2][ts], 2)), "UTF-8")
             else:
-                hier3 = ('TOP', function_name + '_lambda_mod', 'sr', dst + "_data")
+                hier3 = vcd_sr_path + (dst + "_data",)
                 if hier3 in self.vcd:
                     return bytes(hex(int(self.vcd[hier3][ts], 2)), "UTF-8")
-                hier4 = ('TOP', function_name + '_lambda_mod', 'sr', src + "_data")
+                hier4 = vcd_sr_path + (src + "_data",)
                 if hier4 in self.vcd:
                     return bytes(hex(int(self.vcd[hier4][ts], 2)), "UTF-8")
                 return b"not found"
@@ -211,13 +220,13 @@ class DotWidget(Gtk.DrawingArea):
         def get_buffer_data(node_name):
             result = []
             for i in range(200):
-                valid_hier = ('TOP', function_name + '_lambda_mod', 'sr', node_name, f"buf{i}_valid_reg")
+                valid_hier = vcd_sr_path + (node_name, f"buf{i}_valid_reg")
                 if valid_hier not in self.vcd:
                     break
                 vld = self.vcd[valid_hier][ts] == "1"
                 if not vld:
                     break
-                data_hier = ('TOP', function_name + '_lambda_mod', 'sr', node_name, f"buf{i}_data_reg")
+                data_hier = vcd_sr_path + (node_name, f"buf{i}_data_reg")
                 result.append(hex(int(self.vcd[data_hier][ts], 2)))
             return result
 
@@ -898,9 +907,9 @@ class DotWindow(Gtk.Window):
     def on_time_step(self, action=None):
         time_step = int(self.timestep_textentry.get_text())
         if action.get_name() == "TimeBack":
-            time_step -= 2
+            time_step -= self.dotwidget.vcd.time_step*2
         else:
-            time_step += 2
+            time_step += self.dotwidget.vcd.time_step*2
         if time_step < self.dotwidget.vcd.start_time:
             time_step = self.dotwidget.vcd.start_time
         elif time_step > self.dotwidget.vcd.last_change:

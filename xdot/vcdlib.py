@@ -9,9 +9,11 @@ class Vcd:
         last_change = 0
         start_time = 0
         self.net_hier = {}
+        self.time_step = 1e9
         for record in data.values():
-            # ts = to_timeseries(record["tv"], last_time)
-            ts = VcdTimeSeries(record["tv"])
+            tv = record["tv"]
+            self.time_step = min(self.time_step, min((tv[i+1][0]-tv[i][0] for i in range(len(tv)-1)), default=self.time_step))
+            ts = VcdTimeSeries(tv)
             hiers = set()
             for net in record["nets"]:
                 hier = tuple(net["hier"].split(".")) + (net["name"].split('[')[0],)
@@ -20,7 +22,7 @@ class Vcd:
                 d = self.net_hier
                 for h in hier:
                     d = d.setdefault(h, {})
-            if ("TOP", "clk") not in hiers:
+            if ("TOP", "clk") not in hiers and ("TOP", "clock") not in hiers:
                 last_change = max(ts.last_time, last_change)
             if ("TOP", "reset") in hiers:  # assumes there is only one reset
                 start_time = ts.last_time
